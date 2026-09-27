@@ -185,6 +185,11 @@ header{
   color:var(--accent-2);background:hsl(var(--h2) 70% 55% / .13);
   border:1px solid hsl(var(--h2) 70% 55% / .3);text-transform:uppercase;
 }
+.brand .tag-ver{
+  font-size:11px;font-weight:600;letter-spacing:.3px;padding:2.5px 7px;border-radius:999px;
+  color:var(--text-dim);background:var(--panel-flat);border:1px solid var(--border);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
 .bar-right{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 
 .icon-btn{
@@ -701,6 +706,7 @@ html[data-mode="light"] .av-prev .ini{color:hsl(var(--h) 62% 32%);text-shadow:no
       <span class="dot"></span>
       <b>站点后台</b>
       <span class="tag-admin">Admin</span>
+      <span class="tag-ver" id="barVer" title="后台版本,用于确认是否已加载最新版">v—</span>
     </a>
     <div class="bar-right">
       <span class="status ok" id="saveStatus" title="内容保存在本机浏览器"><i></i>已保存</span>
@@ -1270,7 +1276,7 @@ var ROOT = document.documentElement;
 var CONTENT_KEY = 'site-content';
 var PW_KEY      = 'admin-pass';
 var DEFAULT_PW  = 'admin';
-var ADMIN_VER   = '1.0.0';
+var ADMIN_VER   = '1.1.0';
 
 /* --- 主题常量:与 index.html 保持一致 --- */
 var DEFAULT_PREFS = { mode:'dark', hue:212, alpha:1, cursor:1, cursorSize:26 };
@@ -2011,12 +2017,40 @@ function ghSyncAll(){
   if(btn){ btn.classList.add('busy'); btn.disabled = true; }
   if(st){ st.className = 'status busy'; st.innerHTML = '<i></i>同步中…'; }
 
-  var data = contentJSON();
-  var msg  = 'chore(content): 通过后台更新站点内容\n\n' +
-             '更新时间: ' + todayStr() + '\n' +
-             '来源: admin.html 仓库同步';
+  function finish(){
+    if(btn){ btn.classList.remove('busy'); btn.disabled = false; }
+  }
+  function bail(err, fallback){
+    ghShowError(err, fallback);
+    if(st){ st.className = 'status err'; st.innerHTML = '<i></i>同步失败'; }
+    finish();
+  }
 
-  ghPutFile(cfg, data, msg).then(function(res){
+  // 同步阶段的异常(contentJSON / 编码)必须就地兜住,
+  // 否则会逃出 Promise 链,用户只会看到浏览器原生的英文报错
+  var data, msg;
+  try{
+    data = contentJSON();
+    msg  = 'chore(content): 通过后台更新站点内容\n\n' +
+           '更新时间: ' + todayStr() + '\n' +
+           '来源: admin.html 仓库同步';
+  }catch(e){
+    bail(new Error('准备提交内容时出错: ' + ((e && e.message) || e) +
+                   '\n这通常意味着页面数据未正确加载,请刷新后台后重试。'), '同步失败');
+    return;
+  }
+
+  var put;
+  try{
+    put = ghPutFile(cfg, data, msg);
+  }catch(e){
+    bail(new Error('构造提交请求时出错: ' + ((e && e.message) || e) +
+                   (/\btoB64\b|btoa|TextEncoder|InvalidCharacterError/i.test(String(e && e.message))
+                      ? '\n内容编码失败,可能是浏览器版本过旧(需支持 TextEncoder)。' : '')), '同步失败');
+    return;
+  }
+
+  put.then(function(res){
     var commit = res.commit && res.commit.sha ? res.commit.sha.slice(0, 7) : '?';
     toast('已同步到仓库: ' + cfg.owner + '/' + cfg.repo + ' (' + commit + ')', 'ok');
     if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>已同步 ' + commit; }
@@ -2024,11 +2058,8 @@ function ghSyncAll(){
     if(meta) meta.innerHTML = '最近同步 <b>' + esc(commit) + '</b> · ' + esc(new Date().toLocaleString('zh-CN'));
     return res;
   }).catch(function(e){
-    ghShowError(e, '同步失败');
-    if(st){ st.className = 'status err'; st.innerHTML = '<i></i>同步失败'; }
-  }).then(function(){
-    if(btn){ btn.classList.remove('busy'); btn.disabled = false; }
-  });
+    bail(e, '同步失败');
+  }).then(finish);
 }
 
 /* 导入:兼容纯 JSON 与 site-content.js 形式的 window.SITE_CONTENT = {...} */
@@ -2672,6 +2703,7 @@ function renderDashMeta(){
     el2.style.color = EXT_CONTENT ? 'var(--ok)' : 'var(--text-ghost)';
   }
   var av = $('aboutVer'); if(av) av.textContent = 'v' + ADMIN_VER;
+  var bv = $('barVer');  if(bv) bv.textContent = 'v' + ADMIN_VER;
   var dv = $('aboutDataVer'); if(dv) dv.textContent = 'v' + ((STATE.content.meta && STATE.content.meta.version) || 1);
   var sz = $('aboutSize');
   if(sz){ var bytes = new Blob([JSON.stringify(STATE.content)]).size; sz.textContent = fileSize(bytes); }
@@ -2854,7 +2886,16 @@ function bindEvents(){
     var b = $('gTest'); b.disabled = true; b.textContent = '测试中…';
     var st = $('syncState');
     if(st){ st.className = 'status busy'; st.innerHTML = '<i></i>连接中…'; }
-    ghTest(cfg).then(function(info){
+    function done(){ b.disabled = false; b.textContent = '测试连接'; }
+    var pr;
+    try{
+      pr = ghTest(cfg);
+    }catch(e){
+      ghShowError(new Error('发起请求时出错: ' + ((e && e.message) || e)), '连接失败');
+      if(st){ st.className = 'status err'; st.innerHTML = '<i></i>连接失败'; }
+      done(); return;
+    }
+    pr.then(function(info){
       toast('连接成功:' + info.repo, 'ok');
       var meta = $('gMeta');
       if(meta) meta.innerHTML = '分支 <b>' + esc(info.branch) + '</b> · 文件 <b>' + esc(info.file) +
@@ -2863,9 +2904,7 @@ function bindEvents(){
     }).catch(function(e){
       ghShowError(e, '连接失败');
       if(st){ st.className = 'status err'; st.innerHTML = '<i></i>连接失败'; }
-    }).then(function(){
-      b.disabled = false; b.textContent = '测试连接';
-    });
+    }).then(done);
   });
   $('gDiag').addEventListener('click', function(){
     var b = $('gDiag'); b.disabled = true; b.textContent = '诊断中…';
