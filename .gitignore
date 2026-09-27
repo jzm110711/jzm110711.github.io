@@ -1,0 +1,38 @@
+# ---- 临时 / 校验脚本 ----
+# 这些是开发期的自检脚本,不属于站点产物,不必提交
+.check-*.js
+.check-*.mjs
+
+# ---- 编辑器与系统 ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志 ----
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# ---- 依赖(本项目零依赖,保留以防将来引入) ----
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ---- 构建产物(本项目无构建流程,保留以防将来引入) ----
+dist/
+build/
+.cache/
+
+# ---- 本地私有配置 ----
+# 若你 fork 后想保留自己的内容而不提交,可放到这里
+local/
+*.local.json
+
+# ---- WorkBuddy / AI 工作目录 ----
+.workbuddy-ai/

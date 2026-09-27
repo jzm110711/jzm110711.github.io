@@ -1,0 +1,16 @@
+# 自定义域名配置(可选)
+#
+# 用法:把本文件重命名为 CNAME(去掉 .sample 后缀),
+#       内容改成你自己的域名(只写域名,不带 https:// 前缀),然后提交。
+#
+# 例:
+#   mingyuan-ai.com
+#   www.example.edu.cn
+#
+# GitHub Pages 会自动读取该文件并绑定域名。
+# 之后还需在你的域名服务商处添加 DNS 解析记录:
+#   - 根域名(example.com)    → 添加 4 条 A 记录,指向 GitHub Pages 的 IP
+#   - 子域名(www.example.com) → 添加 1 条 CNAME 记录,指向 <用户名>.github.io
+#
+# 注意:一个仓库只能绑定一个域名,写了 CNAME 后仓库的默认
+#       <用户名>.github.io/<仓库名> 地址仍会可用,但会自动跳转到自定义域名。
