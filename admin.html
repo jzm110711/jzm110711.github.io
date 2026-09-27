@@ -219,6 +219,41 @@ header{
 .btn-danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
 
+/* ---------- 仓库同步 ---------- */
+.btn-sync{
+  color:#fff;border:1px solid transparent;
+  background:linear-gradient(135deg,var(--accent-deep),hsl(var(--h) 72% 58%));
+  box-shadow:0 5px 18px var(--glow);
+}
+.btn-sync:hover{transform:translateY(-2px);box-shadow:0 10px 26px var(--glow)}
+.btn-sync.busy{opacity:.72;cursor:progress}
+.sync-hint{margin:2px 0 14px;font-size:13px;line-height:1.65;color:var(--text-dim)}
+.sync-hint code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+  padding:1px 6px;border-radius:5px;background:var(--panel-flat);border:1px solid var(--border);
+}
+.sync-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.fx{display:flex;flex-direction:column;gap:6px}
+.fx > span{font-size:12.5px;font-weight:600;color:var(--text-dim);letter-spacing:.01em}
+.fx input{
+  width:100%;padding:9px 12px;font-size:13.5px;font-family:inherit;
+  color:var(--text);background:var(--panel-flat);
+  border:1px solid var(--border-strong);border-radius:9px;outline:none;
+  transition:border-color .2s,box-shadow .2s,background .2s;
+}
+.fx input::placeholder{color:var(--text-ghost)}
+.fx input:focus{
+  border-color:hsl(var(--h) 62% 60% / .8);
+  box-shadow:0 0 0 3px hsl(var(--h) 70% 55% / .16);
+}
+.sync-meta{margin-left:auto;font-size:12px;color:var(--text-dim);align-self:center}
+.sync-meta b{color:var(--text);font-weight:600}
+.status.err{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent)}
+.status.err i{background:var(--danger)}
+.status.busy{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.status.busy i{background:var(--warn);animation:syncPulse 1s ease-in-out infinite}
+@keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.25}}
+
 /* ============================================================
    布局:左侧分区导航 + 右侧编辑区
    ============================================================ */
@@ -724,10 +759,61 @@ html[data-mode="light"] .av-prev .ini{color:hsl(var(--h) 62% 32%);text-shadow:no
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l5-5 5 5M12 3v12"/></svg>
           导入 JSON / JS
         </button>
+        <button class="btn btn-sync" id="dashSync">
+          <svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"/></svg>
+          同步到仓库
+        </button>
         <button class="btn btn-ghost" id="dashReset" style="margin-left:auto">
           <svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M3.5 13a9 9 0 1 0 2.4-6.3L3 9"/></svg>
           恢复出厂内容
         </button>
+      </div>
+
+      <!-- ---------- 仓库同步 ---------- -->
+      <div class="card glass" style="margin-top:16px">
+        <div class="card-title">
+          <span>
+            <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            仓库同步 (GitHub)
+          </span>
+          <span class="status" id="syncState"><i></i>未配置</span>
+        </div>
+
+        <p class="sync-hint">
+          配置后可在此直接点「同步到仓库」，把当前内容提交到站点的 <code>content.json</code>。
+          凭据仅保存在<b>本机浏览器</b>，不会写入任何会发布的文件，也不会随站点一起上传。
+        </p>
+
+        <div class="sync-grid">
+          <label class="fx">
+            <span>仓库所有者</span>
+            <input type="text" id="gOwner" placeholder="例如 jzm110711" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="fx">
+            <span>仓库名称</span>
+            <input type="text" id="gRepo" placeholder="例如 jzm110711.github.io" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="fx">
+            <span>分支</span>
+            <input type="text" id="gBranch" placeholder="main" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="fx">
+            <span>内容文件路径</span>
+            <input type="text" id="gPath" placeholder="content.json" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+
+        <label class="fx" style="margin-top:12px">
+          <span>访问令牌 (Fine-grained PAT,需 Contents: Read and write 权限)</span>
+          <input type="password" id="gToken" placeholder="github_pat_..." autocomplete="off" spellcheck="false">
+        </label>
+
+        <div class="toolbar" style="margin-top:14px;padding:0;background:none;border:none;box-shadow:none">
+          <button class="btn btn-primary" id="gSave">保存凭据</button>
+          <button class="btn btn-ghost" id="gTest">测试连接</button>
+          <button class="btn btn-ghost" id="gClear">清除凭据</button>
+          <span class="sync-meta" id="gMeta"></span>
+        </div>
       </div>
 
       <div class="ov-grid" id="ovGrid"></div>
@@ -1639,6 +1725,186 @@ function exportJSON(){
   if(download('content.json', contentJSON())) toast('已导出 content.json', 'ok');
 }
 
+/* ============================================================
+   GitHub 仓库同步
+   —— 通过 Contents API 直接提交 content.json 到仓库
+   —— 凭据只存本机 localStorage,绝不写入任何会发布的文件
+   ============================================================ */
+var GH_KEY   = 'gh-sync-config';
+var GH_API   = 'https://api.github.com';
+
+/* UTF-8 安全的 base64(不能直接用 btoa,中文会抛 InvalidCharacterError) */
+function utf8ToB64(str){
+  var bytes = new TextEncoder().encode(str);
+  var bin = '';
+  var CH = 0x8000;
+  for(var i = 0; i < bytes.length; i += CH){
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+function b64ToUtf8(b64){
+  var bin = atob(String(b64).replace(/\s/g, ''));
+  var bytes = new Uint8Array(bin.length);
+  for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function ghLoadCfg(){
+  var c = lsGet(GH_KEY);
+  if(!c) return null;
+  try{
+    var o = JSON.parse(c);
+    if(!isObj(o) || !o.owner || !o.repo || !o.token) return null;
+    if(!o.branch) o.branch = 'main';
+    if(!o.path)   o.path   = 'content.json';
+    return o;
+  }catch(e){ return null; }
+}
+function ghSaveCfg(o){ return lsSet(GH_KEY, JSON.stringify(o)); }
+function ghMask(t){ return t ? t.slice(0, 11) + '…' + t.slice(-4) : ''; }
+
+function ghRender(){
+  var cfg = ghLoadCfg();
+  var st  = $('syncState');
+  var meta= $('gMeta');
+  if(cfg){
+    $('gOwner').value  = cfg.owner;
+    $('gRepo').value   = cfg.repo;
+    $('gBranch').value = cfg.branch;
+    $('gPath').value   = cfg.path;
+    $('gToken').value  = cfg.token;
+    if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>已配置'; }
+    if(meta) meta.innerHTML = '目标 <b>' + esc(cfg.owner + '/' + cfg.repo) + '</b> @ ' + esc(cfg.branch) + ' · 令牌 ' + esc(ghMask(cfg.token));
+  }else{
+    if(st){ st.className = 'status'; st.innerHTML = '<i></i>未配置'; }
+    if(meta) meta.textContent = '填写后点「保存凭据」，再点上方「同步到仓库」';
+  }
+  var syncBtn = $('dashSync');
+  if(syncBtn) syncBtn.title = cfg ? '提交当前内容到 ' + cfg.owner + '/' + cfg.repo : '请先在下方配置仓库凭据';
+}
+
+/* 读取仓库中目标文件的当前 sha(不存在则为 null) */
+function ghGetSha(cfg){
+  return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path +
+               '?ref=' + encodeURIComponent(cfg.branch), {
+    headers: {
+      'Authorization': 'Bearer ' + cfg.token,
+      'Accept': 'application/vnd.github+json',
+      'Cache-Control': 'no-cache'
+    }
+  }).then(function(r){
+    if(r.status === 404) return null;
+    if(r.status === 401) throw new Error('令牌无效或已过期 (401)');
+    if(r.status === 403) throw new Error('令牌权限不足或无仓库访问权 (403)');
+    if(!r.ok) throw new Error('读取仓库失败 (HTTP ' + r.status + ')');
+    return r.json().then(function(j){ return j.sha || null; });
+  });
+}
+
+/* 提交文件到仓库 */
+function ghPutFile(cfg, content, message){
+  var b64 = utf8ToB64(content);
+  return ghGetSha(cfg).then(function(sha){
+    var body = {
+      message: message,
+      content: b64,
+      branch:  cfg.branch
+    };
+    if(sha) body.sha = sha;
+    return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + cfg.token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+  }).then(function(r){
+    if(r.ok) return r.json();
+    return r.text().then(function(t){
+      var msg = t;
+      try{
+        var j = JSON.parse(t);
+        msg = (j.message || t) + (j.errors && j.errors.length ? ' — ' + j.errors.map(function(e){ return e.message || e; }).join('; ') : '');
+      }catch(e){}
+      if(r.status === 409) throw new Error('仓库文件已被他人改动,请刷新后重试 (409)');
+      if(r.status === 422) throw new Error('提交被拒绝,检查分支名与文件路径 (422)');
+      throw new Error('提交失败 (HTTP ' + r.status + '): ' + msg);
+    });
+  });
+}
+
+/* 校验配置表单 */
+function ghReadForm(){
+  var owner  = $('gOwner').value.trim();
+  var repo   = $('gRepo').value.trim();
+  var branch = ($('gBranch').value.trim() || 'main');
+  var path   = ($('gPath').value.trim() || 'content.json').replace(/^\/+/, '');
+  var token  = $('gToken').value.trim();
+  if(!owner)  { toast('请填写仓库所有者', 'err'); return null; }
+  if(!repo)   { toast('请填写仓库名称', 'err'); return null; }
+  if(!token)  { toast('请填写访问令牌', 'err'); return null; }
+  if(!/^github_pat_|^ghp_|^github_pat_11/.test(token) && token.length < 20){
+    toast('访问令牌格式看起来不正确', 'err'); return null;
+  }
+  return { owner: owner, repo: repo, branch: branch, path: path, token: token };
+}
+
+/* 测试连接:读仓库信息 + 读目标文件 */
+function ghTest(cfg){
+  return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo, {
+    headers: {
+      'Authorization': 'Bearer ' + cfg.token,
+      'Accept': 'application/vnd.github+json'
+    }
+  }).then(function(r){
+    if(r.status === 404) throw new Error('仓库不存在或令牌无权访问 (404)');
+    if(r.status === 401) throw new Error('令牌无效或已过期 (401)');
+    if(!r.ok) throw new Error('连接失败 (HTTP ' + r.status + ')');
+    return r.json();
+  }).then(function(info){
+    if(!info.permissions || !info.permissions.push){
+      throw new Error('连接成功,但令牌没有该仓库的写入权限');
+    }
+    return ghGetSha(cfg).then(function(sha){
+      return { repo: info.full_name, branch: cfg.branch, file: cfg.path, sha: sha };
+    });
+  });
+}
+
+/* 同步到仓库的主流程 */
+function ghSyncAll(){
+  var cfg = ghLoadCfg();
+  if(!cfg){ toast('尚未配置仓库凭据,请在下方填写后保存', 'err'); return; }
+  var btn = $('dashSync');
+  var st  = $('syncState');
+  if(btn){ btn.classList.add('busy'); btn.disabled = true; }
+  if(st){ st.className = 'status busy'; st.innerHTML = '<i></i>同步中…'; }
+
+  var data = contentJSON();
+  var msg  = 'chore(content): 通过后台更新站点内容\n\n' +
+             '更新时间: ' + todayStr() + '\n' +
+             '来源: admin.html 仓库同步';
+
+  ghPutFile(cfg, data, msg).then(function(res){
+    var commit = res.commit && res.commit.sha ? res.commit.sha.slice(0, 7) : '?';
+    toast('已同步到仓库: ' + cfg.owner + '/' + cfg.repo + ' (' + commit + ')', 'ok');
+    if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>已同步 ' + commit; }
+    var meta = $('gMeta');
+    if(meta) meta.innerHTML = '最近同步 <b>' + esc(commit) + '</b> · ' + esc(new Date().toLocaleString('zh-CN'));
+    return res;
+  }).catch(function(e){
+    toast(e.message || '同步失败', 'err');
+    if(st){ st.className = 'status err'; st.innerHTML = '<i></i>同步失败'; }
+    var meta = $('gMeta');
+    if(meta) meta.innerHTML = '<span style="color:var(--danger)">' + esc(e.message || '同步失败') + '</span>';
+  }).then(function(){
+    if(btn){ btn.classList.remove('busy'); btn.disabled = false; }
+  });
+}
+
 /* 导入:兼容纯 JSON 与 site-content.js 形式的 window.SITE_CONTENT = {...} */
 function parseImport(text){
   var t = String(text || '').trim();
@@ -2448,6 +2714,43 @@ function bindEvents(){
 
   /* --- 仪表盘工具条 --- */
   $('dashSave').addEventListener('click', function(){ if(save()) toast('已保存并应用到站点', 'ok'); });
+
+  /* ---------- 仓库同步 ---------- */
+  ghRender();
+  $('gSave').addEventListener('click', function(){
+    var cfg = ghReadForm(); if(!cfg) return;
+    if(!ghSaveCfg(cfg)){ toast('凭据保存失败:浏览器存储不可用', 'err'); return; }
+    ghRender();
+    toast('凭据已保存在本机浏览器', 'ok');
+  });
+  $('gTest').addEventListener('click', function(){
+    var cfg = ghReadForm(); if(!cfg) return;
+    var b = $('gTest'); b.disabled = true; b.textContent = '测试中…';
+    var st = $('syncState');
+    if(st){ st.className = 'status busy'; st.innerHTML = '<i></i>连接中…'; }
+    ghTest(cfg).then(function(info){
+      toast('连接成功:' + info.repo, 'ok');
+      var meta = $('gMeta');
+      if(meta) meta.innerHTML = '分支 <b>' + esc(info.branch) + '</b> · 文件 <b>' + esc(info.file) +
+        '</b> · ' + (info.sha ? '远程已有文件,同步将覆盖' : '远程暂无该文件,同步将新建');
+      if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>连接正常'; }
+    }).catch(function(e){
+      toast(e.message || '连接失败', 'err');
+      if(st){ st.className = 'status err'; st.innerHTML = '<i></i>连接失败'; }
+      var meta = $('gMeta');
+      if(meta) meta.innerHTML = '<span style="color:var(--danger)">' + esc(e.message || '连接失败') + '</span>';
+    }).then(function(){
+      b.disabled = false; b.textContent = '测试连接';
+    });
+  });
+  $('gClear').addEventListener('click', function(){
+    if(!confirm('确定清除本机保存的仓库凭据?清除后需重新填写才能同步。')) return;
+    lsDel(GH_KEY);
+    ['gOwner','gRepo','gBranch','gPath','gToken'].forEach(function(id){ var e = $(id); if(e) e.value = ''; });
+    ghRender();
+    toast('已清除仓库凭据', 'ok');
+  });
+  $('dashSync').addEventListener('click', ghSyncAll);
   $('dashExport').addEventListener('click', exportJSON);
   $('dashImport').addEventListener('click', function(){ $('filePick').click(); });
   $('dashReset').addEventListener('click', function(){
