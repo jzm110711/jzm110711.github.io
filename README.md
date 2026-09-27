@@ -497,5 +497,3 @@ const chars = Array.from(String(name));   // 不是 name.match(/[^\s]/)
 [MIT](LICENSE) —— 可自由使用、修改、分发,保留版权声明即可。
 
 页面中的示例人物、单位、论文、奖项等信息**均为虚构**,请替换后再公开发布。
-#   j z m . g i t h u b . i o  
- 
