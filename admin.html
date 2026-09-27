@@ -252,6 +252,17 @@ header{
   box-shadow:0 0 0 3px hsl(var(--h) 70% 55% / .16);
 }
 .sync-meta{margin-left:auto;font-size:12px;color:var(--text-dim);align-self:center}
+.sync-url{
+  margin-top:12px;display:flex;flex-direction:column;gap:5px;
+  padding:9px 12px;border-radius:9px;
+  background:var(--panel-flat);border:1px dashed var(--border);
+}
+.sync-url-label{font-size:11.5px;font-weight:600;color:var(--text-ghost);letter-spacing:.02em}
+.sync-url-val{font-size:12px;line-height:1.6;word-break:break-all;color:var(--text-dim)}
+.sync-url-val code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+  color:var(--text);background:none;border:none;padding:0;
+}
 .sync-meta b{color:var(--text);font-weight:600}
 .status.err{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent)}
 .status.err i{background:var(--danger)}
@@ -816,6 +827,11 @@ html[data-mode="light"] .av-prev .ini{color:hsl(var(--h) 62% 32%);text-shadow:no
           <span>访问令牌 (Fine-grained PAT,需 Contents: Read and write 权限)</span>
           <input type="password" id="gToken" placeholder="github_pat_..." autocomplete="off" spellcheck="false">
         </label>
+
+        <div class="sync-url">
+          <span class="sync-url-label">将要请求的地址</span>
+          <span class="sync-url-val" id="gUrlPreview"></span>
+        </div>
 
         <div class="toolbar" style="margin-top:14px;padding:0;background:none;border:none;box-shadow:none">
           <button class="btn btn-primary" id="gSave">保存凭据</button>
@@ -1797,6 +1813,39 @@ function ghRender(){
   }
   var syncBtn = $('dashSync');
   if(syncBtn) syncBtn.title = cfg ? '提交当前内容到 ' + cfg.owner + '/' + cfg.repo : '请先在下方配置仓库凭据';
+  if(typeof ghPreviewURL === 'function') ghPreviewURL();
+}
+
+/* 实时预览当前表单会请求的地址,帮助发现配置错误 */
+function ghPreviewURL(){
+  var owner = ($('gOwner') ? $('gOwner').value : '').trim();
+  var repo  = ($('gRepo')  ? $('gRepo') .value : '').trim();
+  var path  = ($('gPath')  ? $('gPath') .value : '').trim() || 'content.json';
+  var br    = ($('gBranch')? $('gBranch').value : '').trim() || 'main';
+  var el = $('gUrlPreview');
+  if(!el) return;
+  if(!owner || !repo){
+    el.innerHTML = '<span style="color:var(--text-ghost)">填写所有者与仓库名后,这里会显示实际请求地址</span>';
+    return;
+  }
+  // 预览要与真实请求一致,所以这里复刻 ghReadForm 的归一化:
+  // repo 误填 owner/repo 时自动拆分、剥掉 .git 后缀、去掉 path 前导斜杠。
+  var warn = '';
+  if(repo.indexOf('/') !== -1){
+    var seg = repo.split('/').filter(function(x){ return x; });
+    if(seg.length === 2 && (!owner || owner === seg[0])){
+      owner = seg[0]; repo = seg[1];
+    }else{
+      warn = '<span style="color:var(--danger)">仓库名不应包含 “/”</span><br>';
+      el.innerHTML = warn + '<span style="color:var(--text-ghost)">请只填仓库名,如 jzm110711.github.io</span>';
+      return;
+    }
+  }
+  if(/\.git$/i.test(repo)) repo = repo.slice(0, -4);
+  path = path.replace(/^\/+/, '');
+
+  var u = ghContentsURL({ owner: owner, repo: repo, branch: br, path: path }, true);
+  el.innerHTML = '<code>' + esc(u) + '</code>';
 }
 
 /* ---------- 网络请求包装:把所有 fetch 异常转成可诊断的提示 ----------
@@ -1857,8 +1906,7 @@ function ghFetch(url, opts){
 
 /* 读取仓库中目标文件的当前 sha(不存在则为 null) */
 function ghGetSha(cfg){
-  return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path +
-               '?ref=' + encodeURIComponent(cfg.branch), {
+  return ghFetch(ghContentsURL(cfg, true), {
     headers: {
       'Authorization': 'Bearer ' + cfg.token,
       'Accept': 'application/vnd.github+json',
@@ -1868,7 +1916,8 @@ function ghGetSha(cfg){
     if(r.status === 404) return null;
     if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销,且未过期。');
     if(r.status === 403) throw new Error('令牌权限不足或无仓库访问权 (403)。请确认令牌已勾选该仓库的 Contents 读写权限。');
-    if(!r.ok) throw new Error('读取仓库失败 (HTTP ' + r.status + ')');
+    if(!r.ok) throw new Error('读取仓库失败 (HTTP ' + r.status + ')\n请求地址: ' +
+      GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path);
     return r.json().then(function(j){ return j.sha || null; });
   });
 }
@@ -1883,7 +1932,7 @@ function ghPutFile(cfg, content, message){
       branch:  cfg.branch
     };
     if(sha) body.sha = sha;
-    return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path, {
+    return ghFetch(ghContentsURL(cfg, false), {
       method: 'PUT',
       headers: {
         'Authorization': 'Bearer ' + cfg.token,
@@ -1900,11 +1949,14 @@ function ghPutFile(cfg, content, message){
         var j = JSON.parse(t);
         msg = (j.message || t) + (j.errors && j.errors.length ? ' — ' + j.errors.map(function(e){ return e.message || e; }).join('; ') : '');
       }catch(e){}
-      if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销。');
-      if(r.status === 403) throw new Error('令牌无权写入该仓库 (403)。请确认令牌已勾选该仓库的 Contents 读写权限。');
-      if(r.status === 409) throw new Error('仓库文件已被他人改动,请刷新后重试 (409)');
-      if(r.status === 422) throw new Error('提交被拒绝,检查分支名与文件路径 (422): ' + msg);
-      throw new Error('提交失败 (HTTP ' + r.status + '): ' + msg);
+      var where = '\n请求地址: ' + ghContentsURL(cfg, false) +
+                  '\n仓库: ' + cfg.owner + '/' + cfg.repo + '  分支: ' + cfg.branch + '  路径: ' + cfg.path;
+      if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销。' + where);
+      if(r.status === 403) throw new Error('令牌无权写入该仓库 (403)。请确认令牌已勾选该仓库的 Contents 读写权限。' + where);
+      if(r.status === 404) throw new Error('仓库或分支路径不存在 (404)。请核对仓库名、分支名与文件路径。' + where);
+      if(r.status === 409) throw new Error('仓库文件已被他人改动,请刷新后重试 (409)' + where);
+      if(r.status === 422) throw new Error('提交被拒绝,检查分支名与文件路径 (422): ' + msg + where);
+      throw new Error('提交失败 (HTTP ' + r.status + '): ' + msg + where);
     });
   });
 }
@@ -1916,31 +1968,91 @@ function ghReadForm(){
   var branch = ($('gBranch').value.trim() || 'main');
   var path   = ($('gPath').value.trim() || 'content.json').replace(/^\/+/, '');
   var token  = $('gToken').value.trim();
-  if(!owner)  { toast('请填写仓库所有者', 'err'); return null; }
-  if(!repo)   { toast('请填写仓库名称', 'err'); return null; }
-  if(!token)  { toast('请填写访问令牌', 'err'); return null; }
-  if(!/^github_pat_|^ghp_|^github_pat_11/.test(token) && token.length < 20){
-    toast('访问令牌格式看起来不正确', 'err'); return null;
+
+  if(!owner){ toast('请填写仓库所有者', 'err'); return null; }
+  if(!repo) { toast('请填写仓库名称', 'err'); return null; }
+  if(!token){ toast('请填写访问令牌', 'err'); return null; }
+
+  // 常见误填:把 所有者/仓库 写进了同一个框
+  if(repo.indexOf('/') !== -1){
+    var seg = repo.split('/').filter(function(x){ return x; });
+    if(seg.length === 2 && (!owner || owner === seg[0])){
+      owner = seg[0]; repo = seg[1];
+      $('gOwner').value = owner; $('gRepo').value = repo;
+      toast('已自动拆分:所有者=' + owner + ',仓库=' + repo, 'info');
+    }else{
+      toast('仓库名称不应包含 “/”,请只填仓库名(如 jzm110711.github.io)', 'err'); return null;
+    }
+  }
+  // 去掉常见的 .git 后缀。
+  // 注意:不能用 indexOf('.git') === length-4 —— 仓库名里可能本来就有 “.git” 子串
+  // (如 jzm110711.github.io.git,indexOf 命中前面的 “.github”),会漏剥后缀。
+  if(/\.git$/i.test(repo)) repo = repo.slice(0, -4);
+  if(owner.indexOf('github.com') !== -1 || owner.indexOf('/') !== -1){
+    toast('仓库所有者只填用户名(如 jzm110711),不要填网址', 'err'); return null;
+  }
+  // 所有者与仓库名都不允许内部空白:trim() 只去首尾,
+  // 中间夹了空格的 “jzm 110711” 会被静默编码成 %20,最终得到一个 404,很难反查。
+  if(/\s/.test(owner)){
+    toast('仓库所有者不能包含空格。请只填用户名,如 jzm110711。', 'err'); return null;
+  }
+  if(/\s/.test(repo)){
+    toast('仓库名称不能包含空格。请只填仓库名,如 jzm110711.github.io。', 'err'); return null;
+  }
+  if(/\s/.test(branch) || /\s/.test(path)){
+    toast('分支名与文件路径不能包含空格', 'err'); return null;
+  }
+  // 令牌格式:必须是 github_pat_ 或 ghp_ 开头且长度合理
+  // (旧写法用 「非A && 短」 判断,因 github_pat_ 一旦匹配就短路,校验形同虚设)
+  var looksPat = /^github_pat_[0-9A-Za-z_]{20,}$/.test(token);
+  var looksClassic = /^ghp_[0-9A-Za-z]{30,}$/.test(token);
+  var looksFineOld = /^github_pat_11[0-9A-Za-z_]{20,}$/.test(token);
+  if(!looksPat && !looksClassic && !looksFineOld){
+    toast('访问令牌格式不正确。应为 github_pat_ 开头的细粒度令牌,或 ghp_ 开头的经典令牌;' +
+          '请确认复制完整且未夹带空格与换行。', 'err');
+    return null;
   }
   return { owner: owner, repo: repo, branch: branch, path: path, token: token };
 }
 
+/* 拼出实际会请求的 API 地址,便于用户核对配置。
+   owner 与 repo 各是单段,整体转义(encodeURIComponent 会把误填的 “/” 也转成 %2F,
+   于是地址里一眼能看出配置错了);path 允许多段,逐段转义后用 “/” 连接。 */
+function ghApiBase(cfg){
+  return GH_API + '/repos/' + encodeURIComponent(cfg.owner) + '/' + encodeURIComponent(cfg.repo);
+}
+function ghContentsURL(cfg, withRef){
+  var u = ghApiBase(cfg) + '/contents/' +
+          cfg.path.split('/').map(encodeURIComponent).join('/');
+  if(withRef) u += '?ref=' + encodeURIComponent(cfg.branch);
+  return u;
+}
+function ghRepoURL(cfg){
+  return ghApiBase(cfg);
+}
+
 /* 测试连接:读仓库信息 + 读目标文件 */
 function ghTest(cfg){
-  return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo, {
+  return ghFetch(ghRepoURL(cfg), {
     headers: {
       'Authorization': 'Bearer ' + cfg.token,
       'Accept': 'application/vnd.github+json'
     }
   }).then(function(r){
-    if(r.status === 404) throw new Error('仓库不存在或令牌无权访问 (404)。请核对所有者与仓库名。');
-    if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销,且未过期。');
-    if(r.status === 403) throw new Error('访问被拒绝 (403)。可能是令牌权限不足,或触发了速率限制。');
-    if(!r.ok) throw new Error('连接失败 (HTTP ' + r.status + ')');
+    var where = '\n请求地址: ' + ghRepoURL(cfg) +
+                '\n配置: owner=' + cfg.owner + '  repo=' + cfg.repo +
+                '  branch=' + cfg.branch + '  path=' + cfg.path;
+    if(r.status === 404) throw new Error('仓库不存在或令牌无权访问 (404)。请核对仓库所有者与仓库名。' + where);
+    if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销,且未过期;' +
+      '并确认复制时未夹带空格或换行。' + where);
+    if(r.status === 403) throw new Error('访问被拒绝 (403)。可能是令牌权限不足,或触发了速率限制。' + where);
+    if(!r.ok) throw new Error('连接失败 (HTTP ' + r.status + ')' + where);
     return r.json();
   }).then(function(info){
     if(!info.permissions || !info.permissions.push){
-      throw new Error('连接成功,但令牌没有该仓库的写入权限。请确认令牌已勾选该仓库的 Contents 读写权限。');
+      throw new Error('连接成功,但令牌没有该仓库的写入权限。\n' +
+        '该令牌对 ' + info.full_name + ' 的权限: ' + JSON.stringify(info.permissions || {}) + '\n' +
+        '请确认令牌已勾选该仓库的 Contents: Read and write。');
     }
     return ghGetSha(cfg).then(function(sha){
       return { repo: info.full_name, branch: cfg.branch, file: cfg.path, sha: sha };
@@ -2875,6 +2987,23 @@ function bindEvents(){
 
   /* ---------- 仓库同步 ---------- */
   ghRender();
+  ghPreviewURL();
+  // 配置项变化时实时更新请求地址预览
+  ['gOwner','gRepo','gBranch','gPath'].forEach(function(id){
+    var e = $(id);
+    if(e) e.addEventListener('input', ghPreviewURL);
+  });
+  // 去掉粘贴 token 时常见的首尾空白与换行
+  (function(){
+    var t = $('gToken'); if(!t) return;
+    t.addEventListener('change', function(){
+      var v = t.value.replace(/[\s\u200b]+/g, '');
+      if(v !== t.value){
+        t.value = v;
+        toast('已自动去除令牌中的空白字符', 'info');
+      }
+    });
+  })();
   $('gSave').addEventListener('click', function(){
     var cfg = ghReadForm(); if(!cfg) return;
     if(!ghSaveCfg(cfg)){ toast('凭据保存失败:浏览器存储不可用', 'err'); return; }
