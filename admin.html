@@ -253,6 +253,9 @@ header{
 .status.busy{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
 .status.busy i{background:var(--warn);animation:syncPulse 1s ease-in-out infinite}
 @keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.25}}
+.toast.toast-multi{align-items:flex-start;max-width:min(560px,92vw)}
+.toast.toast-multi svg{margin-top:2px}
+.toast.toast-multi span{white-space:pre-wrap;line-height:1.6;font-weight:400}
 
 /* ============================================================
    布局:左侧分区导航 + 右侧编辑区
@@ -811,6 +814,7 @@ html[data-mode="light"] .av-prev .ini{color:hsl(var(--h) 62% 32%);text-shadow:no
         <div class="toolbar" style="margin-top:14px;padding:0;background:none;border:none;box-shadow:none">
           <button class="btn btn-primary" id="gSave">保存凭据</button>
           <button class="btn btn-ghost" id="gTest">测试连接</button>
+          <button class="btn btn-ghost" id="gDiag">诊断网络</button>
           <button class="btn btn-ghost" id="gClear">清除凭据</button>
           <span class="sync-meta" id="gMeta"></span>
         </div>
@@ -1625,12 +1629,17 @@ function toast(msg, kind){
   if(!box) return;
   var t = document.createElement('div');
   t.className = 'toast ' + (kind || 'ok');
-  t.innerHTML = '<svg viewBox="0 0 24 24">' + (TOAST_ICONS[kind] || TOAST_ICONS.ok) + '</svg><span>' + esc(msg) + '</span>';
+  var s = String(msg == null ? '' : msg);
+  var multiline = s.indexOf('\n') !== -1;
+  if(multiline) t.classList.add('toast-multi');
+  t.innerHTML = '<svg viewBox="0 0 24 24">' + (TOAST_ICONS[kind] || TOAST_ICONS.ok) + '</svg><span>' + esc(s) + '</span>';
   box.appendChild(t);
+  // 多行提示(通常是需要读的报错)停留更久
+  var life = multiline ? Math.min(1200 + s.length * 55, 20000) : 2400;
   setTimeout(function(){
     t.classList.add('out');
     setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 300);
-  }, 2400);
+  }, life);
 }
 
 /* ============================================================
@@ -1784,9 +1793,65 @@ function ghRender(){
   if(syncBtn) syncBtn.title = cfg ? '提交当前内容到 ' + cfg.owner + '/' + cfg.repo : '请先在下方配置仓库凭据';
 }
 
+/* ---------- 网络请求包装:把所有 fetch 异常转成可诊断的提示 ----------
+   原生 fetch 失败只抛 TypeError('Failed to fetch'),信息量为零。
+   这里按 navigator.onLine / 超时 / 代理特征分类,给出可操作的建议。 */
+var GH_TIMEOUT = 25000;
+
+function ghFetch(url, opts){
+  opts = opts || {};
+  var ctl = null, timer = null, timedOut = false;
+  try{
+    if(typeof AbortController !== 'undefined'){
+      ctl = new AbortController();
+      opts.signal = ctl.signal;
+    }
+  }catch(e){ ctl = null; }
+
+  if(ctl){
+    timer = setTimeout(function(){
+      timedOut = true;
+      try{ ctl.abort(); }catch(e){}
+    }, GH_TIMEOUT);
+  }
+
+  var started = Date.now();
+
+  return fetch(url, opts).catch(function(err){
+    var ms = Date.now() - started;
+    var isAbort = timedOut || (err && err.name === 'AbortError');
+    var msg;
+    if(isAbort){
+      msg = '请求超时(超过 ' + Math.round(GH_TIMEOUT / 1000) + ' 秒未响应)。\n' +
+            '常见原因:网络不稳定,或代理/加速工具未转发 api.github.com。\n' +
+            '建议:稍后重试,或暂停 Steam++ 等加速工具的 GitHub 加速后再试。';
+    }else if(typeof navigator !== 'undefined' && navigator.onLine === false){
+      msg = '本机当前处于离线状态,请检查网络连接。';
+    }else{
+      msg = '无法连接 api.github.com(' + ms + 'ms 后失败,无 HTTP 响应)。\n' +
+            '常见原因:\n' +
+            '  1. 浏览器跨域请求被拦截(本站为 https,需能直连 api.github.com)\n' +
+            '  2. Steam++ / Watt Toolkit 等加速工具代理了 github.com 但未正确转发 api.github.com\n' +
+            '  3. 防火墙、杀软或企业代理阻断了对 api.github.com 的访问\n' +
+            '排查建议:暂停加速工具的 GitHub 加速后重试;' +
+            '或在浏览器新标签直接打开 https://api.github.com/ 看是否能返回 JSON。';
+    }
+    var e2 = new Error(msg);
+    e2.__netFail = true;
+    e2.__raw = (err && err.message) || String(err);
+    throw e2;
+  }).then(function(r){
+    if(timer) clearTimeout(timer);
+    return r;
+  }, function(e){
+    if(timer) clearTimeout(timer);
+    throw e;
+  });
+}
+
 /* 读取仓库中目标文件的当前 sha(不存在则为 null) */
 function ghGetSha(cfg){
-  return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path +
+  return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path +
                '?ref=' + encodeURIComponent(cfg.branch), {
     headers: {
       'Authorization': 'Bearer ' + cfg.token,
@@ -1795,8 +1860,8 @@ function ghGetSha(cfg){
     }
   }).then(function(r){
     if(r.status === 404) return null;
-    if(r.status === 401) throw new Error('令牌无效或已过期 (401)');
-    if(r.status === 403) throw new Error('令牌权限不足或无仓库访问权 (403)');
+    if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销,且未过期。');
+    if(r.status === 403) throw new Error('令牌权限不足或无仓库访问权 (403)。请确认令牌已勾选该仓库的 Contents 读写权限。');
     if(!r.ok) throw new Error('读取仓库失败 (HTTP ' + r.status + ')');
     return r.json().then(function(j){ return j.sha || null; });
   });
@@ -1812,7 +1877,7 @@ function ghPutFile(cfg, content, message){
       branch:  cfg.branch
     };
     if(sha) body.sha = sha;
-    return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path, {
+    return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo + '/contents/' + cfg.path, {
       method: 'PUT',
       headers: {
         'Authorization': 'Bearer ' + cfg.token,
@@ -1829,8 +1894,10 @@ function ghPutFile(cfg, content, message){
         var j = JSON.parse(t);
         msg = (j.message || t) + (j.errors && j.errors.length ? ' — ' + j.errors.map(function(e){ return e.message || e; }).join('; ') : '');
       }catch(e){}
+      if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销。');
+      if(r.status === 403) throw new Error('令牌无权写入该仓库 (403)。请确认令牌已勾选该仓库的 Contents 读写权限。');
       if(r.status === 409) throw new Error('仓库文件已被他人改动,请刷新后重试 (409)');
-      if(r.status === 422) throw new Error('提交被拒绝,检查分支名与文件路径 (422)');
+      if(r.status === 422) throw new Error('提交被拒绝,检查分支名与文件路径 (422): ' + msg);
       throw new Error('提交失败 (HTTP ' + r.status + '): ' + msg);
     });
   });
@@ -1854,23 +1921,84 @@ function ghReadForm(){
 
 /* 测试连接:读仓库信息 + 读目标文件 */
 function ghTest(cfg){
-  return fetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo, {
+  return ghFetch(GH_API + '/repos/' + cfg.owner + '/' + cfg.repo, {
     headers: {
       'Authorization': 'Bearer ' + cfg.token,
       'Accept': 'application/vnd.github+json'
     }
   }).then(function(r){
-    if(r.status === 404) throw new Error('仓库不存在或令牌无权访问 (404)');
-    if(r.status === 401) throw new Error('令牌无效或已过期 (401)');
+    if(r.status === 404) throw new Error('仓库不存在或令牌无权访问 (404)。请核对所有者与仓库名。');
+    if(r.status === 401) throw new Error('令牌无效或已过期 (401)。请确认令牌未撤销,且未过期。');
+    if(r.status === 403) throw new Error('访问被拒绝 (403)。可能是令牌权限不足,或触发了速率限制。');
     if(!r.ok) throw new Error('连接失败 (HTTP ' + r.status + ')');
     return r.json();
   }).then(function(info){
     if(!info.permissions || !info.permissions.push){
-      throw new Error('连接成功,但令牌没有该仓库的写入权限');
+      throw new Error('连接成功,但令牌没有该仓库的写入权限。请确认令牌已勾选该仓库的 Contents 读写权限。');
     }
     return ghGetSha(cfg).then(function(sha){
       return { repo: info.full_name, branch: cfg.branch, file: cfg.path, sha: sha };
     });
+  });
+}
+
+/* 统一错误展示:toast 提示 + gMeta 常驻,网络类错误附带原始信息 */
+function ghShowError(err, fallback){
+  var msg = (err && err.message) ? err.message : (fallback || '操作失败');
+  toast(msg, 'err');
+  var meta = $('gMeta');
+  if(!meta) return;
+  var lines = String(msg).split('\n');
+  var html = '<span style="color:var(--danger)">' + esc(lines[0]) + '</span>';
+  for(var i = 1; i < lines.length; i++){
+    html += '<br><span style="color:var(--text-dim)">' + esc(lines[i]) + '</span>';
+  }
+  if(err && err.__raw){
+    html += '<br><span style="color:var(--text-ghost);font-size:11px">底层异常: ' + esc(err.__raw) + '</span>';
+  }
+  meta.innerHTML = html;
+}
+
+/* 网络诊断:不带凭据探测 api.github.com 是否可达,用于区分网络问题与凭据问题 */
+function ghDiagnose(){
+  var meta = $('gMeta');
+  var st = $('syncState');
+  if(st){ st.className = 'status busy'; st.innerHTML = '<i></i>诊断中…'; }
+  if(meta) meta.innerHTML = '<span style="color:var(--text-dim)">正在探测 api.github.com …</span>';
+
+  var env = ['浏览器在线: ' + (navigator.onLine ? '是' : '否(离线!)'),
+             '页面协议: ' + location.protocol];
+
+  // 匿名探测,不需要凭据
+  return ghFetch('https://api.github.com/', {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  }).then(function(r){
+    return r.text().then(function(){ return { ok: true, status: r.status }; });
+  }).catch(function(e){
+    return { ok: false, err: e };
+  }).then(function(res){
+    if(res.ok){
+      var line = ['✓ api.github.com 可达 (HTTP ' + res.status + ')']
+        .concat(env)
+        .concat(['', '网络层正常。若「测试连接」仍失败,问题在令牌或仓库配置,不在网络。'])
+        .join('\n');
+      ghShowError(new Error(line), '诊断完成');
+      if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>网络正常'; }
+    }else{
+      var line2 = ['✗ 无法访问 api.github.com']
+        .concat(env)
+        .concat(['',
+                 (res.err && res.err.message) ? res.err.message : '网络请求失败',
+                 '',
+                 '这是网络层故障,不是令牌或仓库配置的问题。',
+                 '请检查:浏览器是否被代理/加速工具接管;能否在新标签直接打开 https://api.github.com/'])
+        .join('\n');
+      var e1 = new Error(line2);
+      if(res.err && res.err.__raw) e1.__raw = res.err.__raw;
+      ghShowError(e1, '诊断失败');
+      if(st){ st.className = 'status err'; st.innerHTML = '<i></i>网络不通'; }
+    }
+    return res;
   });
 }
 
@@ -1896,10 +2024,8 @@ function ghSyncAll(){
     if(meta) meta.innerHTML = '最近同步 <b>' + esc(commit) + '</b> · ' + esc(new Date().toLocaleString('zh-CN'));
     return res;
   }).catch(function(e){
-    toast(e.message || '同步失败', 'err');
+    ghShowError(e, '同步失败');
     if(st){ st.className = 'status err'; st.innerHTML = '<i></i>同步失败'; }
-    var meta = $('gMeta');
-    if(meta) meta.innerHTML = '<span style="color:var(--danger)">' + esc(e.message || '同步失败') + '</span>';
   }).then(function(){
     if(btn){ btn.classList.remove('busy'); btn.disabled = false; }
   });
@@ -2735,13 +2861,15 @@ function bindEvents(){
         '</b> · ' + (info.sha ? '远程已有文件,同步将覆盖' : '远程暂无该文件,同步将新建');
       if(st){ st.className = 'status ok'; st.innerHTML = '<i></i>连接正常'; }
     }).catch(function(e){
-      toast(e.message || '连接失败', 'err');
+      ghShowError(e, '连接失败');
       if(st){ st.className = 'status err'; st.innerHTML = '<i></i>连接失败'; }
-      var meta = $('gMeta');
-      if(meta) meta.innerHTML = '<span style="color:var(--danger)">' + esc(e.message || '连接失败') + '</span>';
     }).then(function(){
       b.disabled = false; b.textContent = '测试连接';
     });
+  });
+  $('gDiag').addEventListener('click', function(){
+    var b = $('gDiag'); b.disabled = true; b.textContent = '诊断中…';
+    ghDiagnose().then(function(){ b.disabled = false; b.textContent = '诊断网络'; });
   });
   $('gClear').addEventListener('click', function(){
     if(!confirm('确定清除本机保存的仓库凭据?清除后需重新填写才能同步。')) return;
